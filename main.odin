@@ -13,13 +13,37 @@ between_any :: proc(a: rune, b: ..rune) -> bool {
     return false
 }
 
+any_of :: proc(a: string, ss: ..string) -> bool {
+    for b in ss { if a == b do return true }
+    return false
+}
+
 first_rune :: proc(s: string) -> rune {
     for r in s do return r
     return 0
 }
 
+index_unescaped :: proc(str: string, substr: string) -> int {
+    escaped: bool
+    for r, i in str {
+        if escaped do escaped = false
+        else if r == '\\' do escaped = true
+        else if strings.starts_with(str[i:], substr) do return i
+    }
+    return -1
+}
 
-rip_apart :: proc(str: string) -> [] string {
+index_unescaped_any :: proc(str: string, substrs: ..string) -> int {
+    min: int = len(str) + 1
+    for substr in substrs {
+        idx := index_unescaped(str, substr)
+        if idx == -1 do continue
+        if idx < min do min = idx
+    }
+    return min if min != len(str) + 1 else -1
+}
+
+rip_apart :: proc(str: string) -> [] string {//{{{
     using strings
     str := str
 
@@ -31,7 +55,7 @@ rip_apart :: proc(str: string) -> [] string {
     // I think you can infact '\\n' in comments in C, but whatever
     skip_comment :: proc(s: string) -> (string, bool) {
         if starts_with(s, "//") {
-            i := index_any(s, "\r\n")
+            i := index_unescaped_any(s, "\r", "\n")
             if i == -1 do return s, false
             return s[i+1:], true
         }
@@ -45,7 +69,7 @@ rip_apart :: proc(str: string) -> [] string {
 
     skip_preproc :: proc(s: string) -> (string, bool) {
         if starts_with(s, "#") {
-            i := index_any(s, "\r\n")
+            i := index_unescaped_any(s, "\r", "\n")
             if i == -1 do return s, false
             return s[i+1:], true
         }
@@ -53,6 +77,7 @@ rip_apart :: proc(str: string) -> [] string {
     }
 
     skip_string :: proc(s: string) -> (string, bool) {
+        if len(s) == 0 do return "", false
         if s[0] != '"' && s[0] != '\'' do return s, false
         q := s[0]
         escaped := false
@@ -73,6 +98,8 @@ rip_apart :: proc(str: string) -> [] string {
     tokens: [dynamic] string
     
     for i in 0..<10000 {
+        if len(str) < 2 do break
+
         repeat: bool
         str = skip_whitespace(str)
         str, repeat = skip_comment(str) ; if repeat do continue
@@ -87,11 +114,10 @@ rip_apart :: proc(str: string) -> [] string {
             str = str[utf8.rune_size(first_rune(str)):]
             append(&tokens, token)
         }
-        if len(str) < 2 do break
     }
 
     return tokens[:]
-}
+}//}}}
 
 dissolve_bodies :: proc(raw_tokens: [] string) -> [] string {
     tokens: [dynamic] string
@@ -149,8 +175,8 @@ inflate :: proc(tokens: [] string) -> [] string {
         
     for &token, i in tokens {
         next := tokens[i + 1] if i < len(tokens) - 1 else ""
-        if  next == "(" ||  next == ")" || next == "," || next == ";\n" do continue
-        if token == "(" || token == ";\n" do continue
+        if any_of(next,  "(", ")", ",", "*", ";\n") do continue    // STOPS ADDING SPACE BEFORE THESE
+        if any_of(token, "(", ";\n") do continue                   // STOPS ADDING SPACE AFTER  THESE
         
         token = strings.concatenate({ token, " " })
     }
@@ -159,6 +185,7 @@ inflate :: proc(tokens: [] string) -> [] string {
 }
 
 main :: proc() {
+
     path := os.args[1] if len(os.args) > 1 else "."
     name := os.args[2] if len(os.args) > 2 else "__function_index.h"
     
